@@ -1,1 +1,1 @@
-mod server_sftp;
+pub mod server_sftp;

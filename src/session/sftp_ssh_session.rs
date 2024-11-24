@@ -36,7 +36,7 @@ impl Handler for SshSession {
 
     async fn auth_password(&mut self, user: & str, password: & str) -> Result<Auth, Self::Error> {
         // todo!("Implement proper user authentication");
-        println!("SshSession:: User: {} Password: {}", user, password);
+        info!("SshSession::auth_password: User: {} Password: {}", user, password);
         if user == "master" && password == "master" {
             Ok(Auth::Accept)
         } else {

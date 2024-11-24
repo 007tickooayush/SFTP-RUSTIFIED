@@ -1,5 +1,6 @@
 use std::sync::Arc;
 use dotenv::dotenv;
+use log::info;
 use russh::server::Server;
 use russh_keys::key::KeyPair;
 use crate::server::server_sftp::SftpServer;
@@ -23,7 +24,8 @@ async fn main() {
     let mut server = SftpServer;
 
     let address = "0.0.0.0";
-    let port = std::env::var("PORT").unwrap_or("2002".to_string()).parse().unwrap();
+    let port = std::env::var("PORT").unwrap_or("2002".to_string()).parse().unwrap(); // do not use PORT 22 in local development
+    info!("Main::main: address:port => {}:{}", address, port);
 
     server.run_on_address(
         Arc::new(config),

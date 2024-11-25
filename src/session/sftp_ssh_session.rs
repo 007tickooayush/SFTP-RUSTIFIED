@@ -36,7 +36,7 @@ impl Handler for SshSession {
 
     async fn auth_password(&mut self, user: & str, password: & str) -> Result<Auth, Self::Error> {
         // todo!("Implement proper user authentication");
-        info!("SshSession::auth_password: User: {} Password: {}", user, password);
+        println!("SshSession::auth_password: User: {} Password: {}", user, password);
         if user == "master" && password == "master" {
             Ok(Auth::Accept)
         } else {
@@ -46,6 +46,7 @@ impl Handler for SshSession {
 
     async fn auth_publickey(&mut self, user: &str, public_key: &PublicKey) -> Result<Auth, Self::Error> {
         // todo!("Implement Proper Public Key Authentication");
+        println!("SshSession::auth_publickey: User: {} Public Key: {:?}", user, public_key);
         Ok(Auth::Accept)
     }
 
@@ -66,7 +67,7 @@ impl Handler for SshSession {
 
     async fn subsystem_request(&mut self, channel_id: ChannelId, name: &str, session: &mut Session) -> Result<(), Self::Error> {
         // todo!("Handle the subsystem request properly");
-        info!("Subsystem Request: {}", name);
+        println!("Subsystem Request: {}", name);
         if name == "sftp" {
             let channel = self.get_channel(channel_id).await;
             let sftp = SftpSession::default();

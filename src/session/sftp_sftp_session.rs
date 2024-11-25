@@ -39,14 +39,14 @@ impl russh_sftp::server::Handler for SftpSession {
     }
 
     async fn opendir(&mut self, id: u32, path: String) -> Result<Handle, Self::Error> {
-        info!("SftpSession::opendir: id: {:?} path: {:?}", id, path);
+        println!("SftpSession::opendir: id: {:?} path: {:?}", id, path);
         self.root_dir_read_done = false;
         Ok(Handle { id, handle: path })
     }
 
     async fn readdir(&mut self, id: u32, handle: String) -> Result<Name, Self::Error> {
         // todo!("Handle the readdir function properly");
-        info!("SftpSession::readdir: id: {:?} handle: {:?}", id, handle);
+        println!("SftpSession::readdir: id: {:?} handle: {:?}", id, handle);
         if handle == "/" && self.root_dir_read_done {
             self.root_dir_read_done = false;
             return Ok(Name {
@@ -64,7 +64,7 @@ impl russh_sftp::server::Handler for SftpSession {
 
     async fn realpath(&mut self, id: u32, path: String) -> Result<Name, Self::Error> {
         // todo!("Handle the realpath function properly");
-        info!("SftpSession::realpath: id: {:?} path: {:?}", id, path);
+        println!("SftpSession::realpath: id: {:?} path: {:?}", id, path);
         Ok(Name {
             id,
             files: vec![

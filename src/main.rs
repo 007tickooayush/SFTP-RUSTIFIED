@@ -7,6 +7,7 @@ use crate::server::server_sftp::SftpServer;
 
 mod server;
 mod session;
+mod utils;
 
 #[tokio::main]
 async fn main() {

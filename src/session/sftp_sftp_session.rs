@@ -5,9 +5,9 @@ use std::time::{Duration, UNIX_EPOCH};
 use async_trait::async_trait;
 use dotenv::dotenv;
 use log::{error, info};
-use russh_sftp::protocol::{Data, File, FileAttributes, Handle, Name, Status, StatusCode, Version};
+use russh_sftp::protocol::{Data, File, FileAttributes, Handle, Name, OpenFlags, Status, StatusCode, Version};
 use tokio::fs::OpenOptions;
-use tokio::io::AsyncWriteExt;
+use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
 use crate::utils::utils::create_root_dir;
 
 #[derive(Default)]
@@ -56,6 +56,20 @@ impl russh_sftp::server::Handler for SftpSession {
         Ok(Version::new())
     }
 
+    async fn open(&mut self, id: u32, filename: String, pflags: OpenFlags, attrs: FileAttributes) -> Result<Handle, Self::Error> {
+        println!("SftpSession::open: id: {:?} filename: {:?} pflags: {:?} attrs: {:?}", id, filename, pflags, attrs);
+        let file_path = self.server_root_dir.join(&filename);
+        let file = OpenOptions::new()
+            .read(pflags.contains(OpenFlags::READ))
+            .write(pflags.contains(OpenFlags::WRITE))
+            .create(pflags.contains(OpenFlags::CREATE))
+            .open(&file_path)
+            .await
+            .map_err(|_| StatusCode::PermissionDenied)?;
+
+        Ok(Handle { id, handle: filename })
+    }
+
     async fn close(&mut self, id: u32, handle: String) -> Result<Status, Self::Error> {
         // todo!("Handle the close function properly");
         Ok(Status {
@@ -67,14 +81,32 @@ impl russh_sftp::server::Handler for SftpSession {
     }
 
     async fn read(&mut self, id: u32, handle: String, offset: u64, len: u32) -> Result<Data, Self::Error> {
+        println!("SftpSession::read: id: {:?} handle: {:?} offset: {:?} len: {:?}", id, handle, offset, len);
         todo!("Handle the read function properly");
     }
 
     async fn write(&mut self, id: u32, handle: String, offset: u64, data: Vec<u8>) -> Result<Status, Self::Error> {
-        todo!("Handle the write function properly");
+        println!("SftpSession::write: id: {:?} handle: {:?} offset: {:?} data: {:?}", id, handle, offset, data);
+        let file_path = self.server_root_dir.join(handle);
+
+        let mut file = OpenOptions::new()
+            .write(true)
+            .create(true)
+            .open(&file_path)
+            .await
+            .map_err(|_| StatusCode::PermissionDenied)?;
+
+        file.seek(tokio::io::SeekFrom::Start(offset)).await.map_err(|_| StatusCode::Failure)?;
+        file.write_all(&data).await.map_err(|_| StatusCode::Failure)?;
+
+        Ok(Status {
+            id,
+            status_code: StatusCode::Ok,
+            error_message: "Ok".to_string(),
+            language_tag: "en-US".to_string()
+        })
+
     }
-
-
 
     async fn opendir(&mut self, id: u32, path: String) -> Result<Handle, Self::Error> {
         println!("SftpSession::opendir: id: {:?} path: {:?}", id, path);

@@ -1,6 +1,7 @@
 use std::collections::HashMap;
+use std::io;
 use std::os::unix::prelude::{MetadataExt, PermissionsExt};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, UNIX_EPOCH};
 use async_trait::async_trait;
 use dotenv::dotenv;
@@ -8,6 +9,7 @@ use log::{error, info};
 use russh_sftp::protocol::{Data, File, FileAttributes, Handle, Name, OpenFlags, Status, StatusCode, Version};
 use tokio::fs::OpenOptions;
 use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
+use crate::utils::file_handler_util::FileHandler;
 use crate::utils::utils::create_root_dir;
 
 #[derive(Default)]
@@ -15,7 +17,7 @@ pub struct SftpSession {
     version: Option<u32>,
     root_dir_read_done: bool,
     server_root_dir: PathBuf,
-    cwd:PathBuf,
+    cwd: PathBuf,
 }
 
 #[async_trait]
@@ -28,7 +30,6 @@ impl russh_sftp::server::Handler for SftpSession {
 
     async fn init(&mut self, version: u32, extensions: HashMap<String, String>) -> Result<Version, Self::Error> {
         dotenv().ok();
-
         info!("SftpSession::init: version: {:?} extensions: {:?}", version, extensions);
         if self.version.is_some() {
             error!("SftpSession::init: version: {:?} extensions: {:?}", self.version, extensions);
@@ -36,12 +37,10 @@ impl russh_sftp::server::Handler for SftpSession {
         }
 
         let root_dir = std::env::var("ROOT_DIR").unwrap_or(".".to_string());
-
         match create_root_dir(&root_dir).await {
             Ok(_) => {
-                // todo("Have different ROOT_DIR for each SFTP client");
                 self.server_root_dir = PathBuf::from(root_dir);
-                self.cwd = self.server_root_dir.clone();
+                self.cwd = PathBuf::from("/");
             },
             Err(e) => {
                 eprintln!("Error creating root directory: {}", e);
@@ -51,14 +50,12 @@ impl russh_sftp::server::Handler for SftpSession {
 
         self.version = Some(version);
         println!("SftpSession::init: version: {:?} extensions: {:?}", self.version, extensions);
-
-
         Ok(Version::new())
     }
 
     async fn open(&mut self, id: u32, filename: String, pflags: OpenFlags, attrs: FileAttributes) -> Result<Handle, Self::Error> {
         println!("SftpSession::open: id: {:?} filename: {:?} pflags: {:?} attrs: {:?}", id, filename, pflags, attrs);
-        let file_path = self.server_root_dir.join(&filename);
+        let file_path = self.server_root_dir.join(filename);
         let file = OpenOptions::new()
             .read(pflags.contains(OpenFlags::READ))
             .write(pflags.contains(OpenFlags::WRITE))
@@ -67,11 +64,12 @@ impl russh_sftp::server::Handler for SftpSession {
             .await
             .map_err(|_| StatusCode::PermissionDenied)?;
 
-        Ok(Handle { id, handle: filename })
+        Ok(Handle { id, handle: file_path.to_string_lossy().to_string() })
     }
 
     async fn close(&mut self, id: u32, handle: String) -> Result<Status, Self::Error> {
-        // todo!("Handle the close function properly");
+        println!("SftpSession::close: id: {:?} handle: {:?}", id, handle);
+        // Implement the close logic if needed
         Ok(Status {
             id,
             status_code: StatusCode::Ok,
@@ -82,19 +80,20 @@ impl russh_sftp::server::Handler for SftpSession {
 
     async fn read(&mut self, id: u32, handle: String, offset: u64, len: u32) -> Result<Data, Self::Error> {
         println!("SftpSession::read: id: {:?} handle: {:?} offset: {:?} len: {:?}", id, handle, offset, len);
-        todo!("Handle the read function properly");
+        let file_path = self.server_root_dir.join(handle);
+        let mut file = OpenOptions::new().read(true).open(&file_path).await.map_err(|_| StatusCode::NoSuchFile)?;
+
+        file.seek(tokio::io::SeekFrom::Start(offset)).await.map_err(|_| StatusCode::Failure)?;
+        let mut buffer = vec![0; len as usize];
+        let n = file.read(&mut buffer).await.map_err(|_| StatusCode::Failure)?;
+
+        Ok(Data { id, data: buffer[..n].to_vec() })
     }
 
     async fn write(&mut self, id: u32, handle: String, offset: u64, data: Vec<u8>) -> Result<Status, Self::Error> {
         println!("SftpSession::write: id: {:?} handle: {:?} offset: {:?} data: {:?}", id, handle, offset, data);
         let file_path = self.server_root_dir.join(handle);
-
-        let mut file = OpenOptions::new()
-            .write(true)
-            .create(true)
-            .open(&file_path)
-            .await
-            .map_err(|_| StatusCode::PermissionDenied)?;
+        let mut file = OpenOptions::new().write(true).create(true).open(&file_path).await.map_err(|_| StatusCode::PermissionDenied)?;
 
         file.seek(tokio::io::SeekFrom::Start(offset)).await.map_err(|_| StatusCode::Failure)?;
         file.write_all(&data).await.map_err(|_| StatusCode::Failure)?;
@@ -105,19 +104,21 @@ impl russh_sftp::server::Handler for SftpSession {
             error_message: "Ok".to_string(),
             language_tag: "en-US".to_string()
         })
-
     }
 
     async fn opendir(&mut self, id: u32, path: String) -> Result<Handle, Self::Error> {
         println!("SftpSession::opendir: id: {:?} path: {:?}", id, path);
         self.root_dir_read_done = false;
+        // let mut path = self.server_root_dir.to_string_lossy().to_string().push(');
+        // let mut return_path = self.server_root_dir.clone();
+        // return_path.push(path.trim_start_matches('/'));
+        // let return_path = return_path.to_string_lossy().to_string();
+        // self.cwd = PathBuf::from(return_path.clone());
         Ok(Handle { id, handle: path })
     }
 
     async fn readdir(&mut self, id: u32, handle: String) -> Result<Name, Self::Error> {
-        // todo!("Handle the readdir function properly");
         println!("SftpSession::readdir: id: {:?} handle: {:?}", id, handle);
-
         let path = if handle == "/" {
             self.server_root_dir.clone()
         } else {
@@ -127,7 +128,7 @@ impl russh_sftp::server::Handler for SftpSession {
         let mut contents = tokio::fs::read_dir(path).await.map_err(|_| StatusCode::NoSuchFile)?;
         let mut files = Vec::new();
 
-        while let Some(entry) = contents.next_entry().await.map_err(|_| StatusCode::Eof)? {
+        while let Some(entry) = contents.next_entry().await.map_err(|_| StatusCode::Failure)? {
             let file_name = entry.file_name().into_string().map_err(|_| StatusCode::NoSuchFile)?;
             let metadata = entry.metadata().await.map_err(|_| StatusCode::Failure)?;
 
@@ -141,7 +142,7 @@ impl russh_sftp::server::Handler for SftpSession {
                 group: None,
                 user: Some("SFTP-rustified".to_string()),
             };
-            files.push(File::new(file_name,file_attrs));
+            files.push(File::new(file_name, file_attrs));
         }
 
         if self.root_dir_read_done {
@@ -150,57 +151,43 @@ impl russh_sftp::server::Handler for SftpSession {
 
         self.root_dir_read_done = true;
 
-        Ok(Name {
-            id,
-            files
-        })
-
-        // if handle == "/" && self.root_dir_read_done {
-        //     self.root_dir_read_done = false;
-        //     return Ok(Name {
-        //         id,
-        //         files: vec![
-        //             File::dummy("foo.txt"),
-        //             File::dummy("bar.txt")
-        //         ]
-        //     })
-        // }
-        //
-        // // If all files have been read, return an Err to indicate EOF not empty list
-        // Err(StatusCode::Eof)
+        Ok(Name { id, files })
     }
 
-    /// Used to Provide the Directory path to be used by the Client like "/"
     async fn realpath(&mut self, id: u32, path: String) -> Result<Name, Self::Error> {
-        // todo!("Handle the realpath function properly");
         println!("SftpSession::realpath: id: {:?} path: {:?}", id, path);
-        // let mut used_path ;
-        // if path == "." {
-        //     used_path = self.cwd.clone();
-        // } else {
-        //     used_path = self.cwd.join(path);
-        // }
-        // used_path.push("foo.txt");
-        //
-        // let mut file2 = tokio::fs::File::create(used_path).await.unwrap();
-        // file2.write_all(b"Hello, World!").await.unwrap();
-        //
-        //
-        //
-        // Ok(Name {
-        //     id,
-        //     files: vec![
-        //         File::new("foo.txt", FileAttributes::default()),
-        //     ]
-        // })
-
+        // let filename = self.cwd.to_str().ok_or(StatusCode::NoSuchFile)?;
+        // let dir_path = self.server_root_dir.join(Path::new(&path));
+        // let complete_path = self.complete_path(dir_path).map_err(|_| StatusCode::NoSuchFile)?;
+        let complete_path = self.complete_path(PathBuf::from(path)).map_err(|_| StatusCode::NoSuchFile)?;
+        let filename = complete_path.to_string_lossy().to_string();
         Ok(Name {
             id,
-            files: vec![
-                File::new("/", FileAttributes::default()),
-            ]
+            files: vec![File::new(filename, FileAttributes::default())]
         })
     }
+}
 
+impl FileHandler for SftpSession {
+    fn complete_path(&self, path: PathBuf) -> Result<PathBuf, io::Error> {
+        let mut path = path;
+        let path: PathBuf = path.components().filter(|c| *c != std::path::Component::CurDir).collect();
+        let mut directory = self.server_root_dir.join( if path.has_root() {
+            // let path = path.components().filter(|c| *c != std::path::Component::CurDir).collect();
+            path.iter().skip(1).collect()
+        } else {
+            path
+        });
 
+        // Normalize the path by removing "." segments
+        // directory = directory.components().filter(|c| *c != std::path::Component::CurDir).collect();
+
+        let dir = directory.canonicalize();
+        if let Ok(ref dir) = dir {
+            if !dir.starts_with(&self.server_root_dir) {
+                return Err(std::io::ErrorKind::PermissionDenied.into());
+            }
+        }
+        dir
+    }
 }

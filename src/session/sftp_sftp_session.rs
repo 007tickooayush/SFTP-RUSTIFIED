@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::io;
+use std::io::{Error, ErrorKind};
 use std::os::unix::prelude::{MetadataExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, UNIX_EPOCH};
@@ -154,16 +155,31 @@ impl russh_sftp::server::Handler for SftpSession {
         Ok(Name { id, files })
     }
 
+    async fn mkdir(&mut self, id: u32, path: String, attrs: FileAttributes) -> Result<Status, Self::Error> {
+        println!("SftpSession::mkdir: id: {:?} path: {:?} attrs: {:?}", id, path, attrs);
+        let path = self.server_root_dir.join(path.trim_start_matches("/"));
+        match tokio::fs::create_dir(&path).await {
+            Ok(_) => {
+                Ok(Status {
+                    id,
+                    status_code: StatusCode::Ok,
+                    error_message: "Ok".to_string(),
+                    language_tag: "en-US".to_string()
+                })
+            },
+            Err(_) => {
+                Err(StatusCode::PermissionDenied)
+            }
+        }
+    }
+
     async fn realpath(&mut self, id: u32, path: String) -> Result<Name, Self::Error> {
         println!("SftpSession::realpath: id: {:?} path: {:?}", id, path);
-        // let filename = self.cwd.to_str().ok_or(StatusCode::NoSuchFile)?;
-        // let dir_path = self.server_root_dir.join(Path::new(&path));
-        // let complete_path = self.complete_path(dir_path).map_err(|_| StatusCode::NoSuchFile)?;
-        let complete_path = self.complete_path(PathBuf::from(path)).map_err(|_| StatusCode::NoSuchFile)?;
-        let filename = complete_path.to_string_lossy().to_string();
+        let path = PathBuf::from(path).canonicalize().map_err(|_| StatusCode::NoSuchFile)?.to_string_lossy().to_string();
+        // let return_path = self.cwd.to_str().ok_or_else(|| StatusCode::NoSuchFile)?;
         Ok(Name {
             id,
-            files: vec![File::new(filename, FileAttributes::default())]
+            files: vec![File::new("/", FileAttributes::default())]
         })
     }
 }
@@ -185,9 +201,22 @@ impl FileHandler for SftpSession {
         let dir = directory.canonicalize();
         if let Ok(ref dir) = dir {
             if !dir.starts_with(&self.server_root_dir) {
-                return Err(std::io::ErrorKind::PermissionDenied.into());
+                return Err(ErrorKind::PermissionDenied.into());
             }
         }
         dir
+    }
+
+    fn remove_prefix_str(&self, path: PathBuf, prefix: &str) -> Result<PathBuf, Error> {
+        if path.starts_with(prefix.to_string()) {
+            // let path = path.strip_prefix(prefix).map_err(|_| Error::new(ErrorKind::InvalidInput, "Path does not start with prefix"))?.to_path_buf();
+            // Ok(path)
+            match path.strip_prefix(prefix) {
+                Ok(path) => Ok(Path::new(path).to_path_buf()),
+                Err(_) => Err(Error::new(ErrorKind::InvalidInput, "Path does not start with prefix"))
+            }
+        } else {
+            Err(Error::new(ErrorKind::InvalidInput, "Path does not start with prefix"))
+        }
     }
 }

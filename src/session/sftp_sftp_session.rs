@@ -31,7 +31,7 @@ impl russh_sftp::server::Handler for SftpSession {
 
     async fn init(&mut self, version: u32, extensions: HashMap<String, String>) -> Result<Version, Self::Error> {
         dotenv().ok();
-        info!("SftpSession::init: version: {:?} extensions: {:?}", version, extensions);
+        println!("SftpSession::init: version: {:?} extensions: {:?}", version, extensions);
         if self.version.is_some() {
             error!("SftpSession::init: version: {:?} extensions: {:?}", self.version, extensions);
             return Err(StatusCode::ConnectionLost);
@@ -56,14 +56,24 @@ impl russh_sftp::server::Handler for SftpSession {
 
     async fn open(&mut self, id: u32, filename: String, pflags: OpenFlags, attrs: FileAttributes) -> Result<Handle, Self::Error> {
         println!("SftpSession::open: id: {:?} filename: {:?} pflags: {:?} attrs: {:?}", id, filename, pflags, attrs);
-        let file_path = self.server_root_dir.join(filename);
-        let file = OpenOptions::new()
-            .read(pflags.contains(OpenFlags::READ))
-            .write(pflags.contains(OpenFlags::WRITE))
-            .create(pflags.contains(OpenFlags::CREATE))
-            .open(&file_path)
-            .await
-            .map_err(|_| StatusCode::PermissionDenied)?;
+        let file_path = self.server_root_dir.join(filename.trim_start_matches("/"));
+        if !file_path.exists() {
+            // let file = tokio::fs::File::create(&file_path).await.map_err(|_| StatusCode::PermissionDenied)?;
+            OpenOptions::new()
+                .create_new(true)
+                .read(pflags.contains(OpenFlags::READ))
+                .write(pflags.contains(OpenFlags::WRITE))
+                .open(&file_path)
+                .await
+                .map_err(|_| StatusCode::PermissionDenied)?;
+        } else {
+            OpenOptions::new()
+                .read(pflags.contains(OpenFlags::READ))
+                .write(pflags.contains(OpenFlags::WRITE))
+                .open(&file_path)
+                .await
+                .map_err(|_| StatusCode::PermissionDenied)?;
+        }
 
         Ok(Handle { id, handle: file_path.to_string_lossy().to_string() })
     }
@@ -94,7 +104,7 @@ impl russh_sftp::server::Handler for SftpSession {
     async fn write(&mut self, id: u32, handle: String, offset: u64, data: Vec<u8>) -> Result<Status, Self::Error> {
         println!("SftpSession::write: id: {:?} handle: {:?} offset: {:?} data: {:?}", id, handle, offset, data);
         let file_path = self.server_root_dir.join(handle);
-        let mut file = OpenOptions::new().write(true).create(true).open(&file_path).await.map_err(|_| StatusCode::PermissionDenied)?;
+        let mut file = OpenOptions::new().write(true).open(&file_path).await.map_err(|_| StatusCode::PermissionDenied)?;
 
         file.seek(tokio::io::SeekFrom::Start(offset)).await.map_err(|_| StatusCode::Failure)?;
         file.write_all(&data).await.map_err(|_| StatusCode::Failure)?;
@@ -175,6 +185,9 @@ impl russh_sftp::server::Handler for SftpSession {
 
     async fn realpath(&mut self, id: u32, path: String) -> Result<Name, Self::Error> {
         println!("SftpSession::realpath: id: {:?} path: {:?}", id, path);
+        let new_path = PathBuf::from(path.clone()).canonicalize().map_err(|_| StatusCode::NoSuchFile)?;
+        println!("SftpSession::realpath: new_path: {:?}", new_path);
+        // self.cwd = ;
         let path = PathBuf::from(path).canonicalize().map_err(|_| StatusCode::NoSuchFile)?.to_string_lossy().to_string();
         // let return_path = self.cwd.to_str().ok_or_else(|| StatusCode::NoSuchFile)?;
         Ok(Name {

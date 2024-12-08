@@ -184,7 +184,6 @@ impl russh_sftp::server::Handler for SftpSession {
             }
         }
     }
-
     async fn mkdir(&mut self, id: u32, path: String, attrs: FileAttributes) -> Result<Status, Self::Error> {
         println!("SftpSession::mkdir: id: {:?} path: {:?} attrs: {:?}", id, path, attrs);
         let path = self.server_root_dir.join(path.trim_start_matches("/"));
@@ -200,6 +199,31 @@ impl russh_sftp::server::Handler for SftpSession {
             Err(_) => {
                 Err(StatusCode::PermissionDenied)
             }
+        }
+    }
+
+    async fn rmdir(&mut self, id: u32, path: String) -> Result<Status, Self::Error> {
+        println!("SftpSession::rmdir: id: {:?} path: {:?}", id, path);
+        let dir_path = self.server_root_dir.join(path.trim_start_matches("/"));
+
+        if dir_path.is_dir() {
+            match tokio::fs::remove_dir(&dir_path).await {
+                Ok(_) => {
+                    Ok(Status {
+                        id,
+                        status_code: StatusCode::Ok,
+                        error_message: "Ok".to_string(),
+                        language_tag: "en-US".to_string()
+                    })
+                },
+                Err(e) => {
+                    eprintln!("Error removing directory: {}", e);
+                    Err(StatusCode::PermissionDenied)
+                }
+            }
+        } else {
+            eprintln!("Error removing directory(NOT A DIRECTORY): {:?}", dir_path);
+            Err(StatusCode::OpUnsupported)
         }
     }
 

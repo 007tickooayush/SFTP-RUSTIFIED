@@ -165,6 +165,26 @@ impl russh_sftp::server::Handler for SftpSession {
         Ok(Name { id, files })
     }
 
+    async fn remove(&mut self, id: u32, filename: String) -> Result<Status, Self::Error> {
+        println!("SftpSession::remove: id: {:?} filename: {:?}", id, filename);
+        let file_path = self.server_root_dir.join(filename.trim_start_matches("/"));
+        // .map_err(|_| StatusCode::PermissionDenied)?;
+        match tokio::fs::remove_file(&file_path).await {
+            Ok(_) => {
+                Ok(Status {
+                    id,
+                    status_code: StatusCode::Ok,
+                    error_message: "Ok".to_string(),
+                    language_tag: "en-US".to_string()
+                })
+            },
+            Err(e) => {
+                eprintln!("Error removing file: {}", e);
+                Err(StatusCode::PermissionDenied)
+            }
+        }
+    }
+
     async fn mkdir(&mut self, id: u32, path: String, attrs: FileAttributes) -> Result<Status, Self::Error> {
         println!("SftpSession::mkdir: id: {:?} path: {:?} attrs: {:?}", id, path, attrs);
         let path = self.server_root_dir.join(path.trim_start_matches("/"));
